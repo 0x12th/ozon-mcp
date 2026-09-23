@@ -237,7 +237,7 @@ different answers.
 | `OZON_IDLE_SECONDS` | `600` | Close the idle browser; the HTTP session stays |
 | `OZON_TRANSPORT` | `stdio` | `stdio` (client spawns the process), `http` (streamable HTTP at `/mcp`) or `sse` (deprecated, `/sse`) |
 | `OZON_HOST` / `OZON_PORT` | `0.0.0.0` / `8084` | Bind for the HTTP transports; the same port serves `/metrics` |
-| `OZON_ALLOWED_HOSTS` | `[]` | `Host` headers `sse` accepts; empty means any. Naming hosts turns on MCP's exact-match check |
+| `OZON_ALLOWED_HOSTS` | `[]` | `Host` headers the HTTP transports (`http` and `sse`) accept; empty means any. Naming hosts turns on MCP's exact-match check |
 
 See `env.example`.
 
