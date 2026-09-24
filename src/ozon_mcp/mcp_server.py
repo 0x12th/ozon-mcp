@@ -113,11 +113,13 @@ def _transport_security() -> TransportSecuritySettings:
     with none named it stays off, or every client using the address it was given
     would be answered 421 by a server that is working correctly.
     """
-    allowed = get_settings().allowed_hosts
+    allowed = list(get_settings().allowed_hosts)
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=bool(allowed),
         allowed_hosts=allowed,
     )
 
 
+# Host protection is fixed when FastMCP is constructed; changing the environment
+# (or mutating settings) later does not reconfigure the running server.
 mcp: Final = FastMCP("ozon", instructions=INSTRUCTIONS, transport_security=_transport_security())

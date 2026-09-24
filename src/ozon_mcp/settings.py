@@ -2,7 +2,6 @@
 fixed values live in ``constants``.
 """
 
-from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -10,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class OzonSettings(BaseSettings):
-    """Session, transport and feature flags, read from ``OZON_*`` env vars."""
+    """Startup configuration from ``OZON_*``; change it by restarting the process."""
 
     model_config = SettingsConfigDict(env_prefix="OZON_", extra="ignore")
 
@@ -84,6 +83,9 @@ class OzonSettings(BaseSettings):
     """
 
 
-@cache
+_settings = OzonSettings()
+
+
 def get_settings() -> OzonSettings:
-    return OzonSettings()
+    """Return the process's startup settings, not a live view of the environment."""
+    return _settings

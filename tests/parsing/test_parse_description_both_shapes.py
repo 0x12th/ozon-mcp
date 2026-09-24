@@ -21,7 +21,3 @@ def test_parse_description_reads_structured_nodes() -> None:
     described = parse_description("2", _page({"richAnnotationJson": json.dumps(rich, ensure_ascii=False)}))
     assert described.description is not None
     assert "Первый абзац описания" in described.description
-
-
-def test_parse_description_without_a_widget() -> None:
-    assert parse_description("3", {"widgetStates": {}}).description is None

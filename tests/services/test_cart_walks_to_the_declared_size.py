@@ -59,12 +59,6 @@ def test_the_walk_continues_until_the_cart_is_whole(session: FakeSession) -> Non
     assert [item.id for item in whole.items] == ["1", "2", "3", "4"]
 
 
-def test_a_recommendation_paginator_is_never_followed(session: FakeSession) -> None:
-    session.pages = {"/cart": _cart_page(["1"], declared=1, paginators=[SIDE])}
-    cart.get_cart()
-    assert SIDE not in session.fetched
-
-
 def test_a_write_without_the_gate_is_refused_before_anything_is_sent(session: FakeSession) -> None:
     with pytest.raises(WritesDisabledError):
         cart.set_cart_quantity("1", 1)

@@ -6,8 +6,17 @@ from pydantic import Field
 
 from ozon_mcp.dependencies import run_blocking
 from ozon_mcp.mcp_server import mcp
-from ozon_mcp.models.catalog import Cheaper, DeliveryEstimate, Description, ProductCard, Reviews, SearchFilter, Tile
-from ozon_mcp.services import catalog
+from ozon_mcp.models.catalog import (
+    Cheaper,
+    DeliveryEstimate,
+    Description,
+    ProductCard,
+    ProductComparison,
+    Reviews,
+    SearchFilter,
+    Tile,
+)
+from ozon_mcp.services import catalog, comparison
 from ozon_mcp.utils.annotations import Limit, Page, ReviewSort, SearchSort, SkuOrUrl
 
 
@@ -47,6 +56,23 @@ async def search(
     {"currency_price": "200;600"}. Narrowing by price is a filter, not a sort.
     """
     return await run_blocking(lambda: catalog.search(query, category, sort, page, filters, limit))
+
+
+@mcp.tool()
+async def compare_products(
+    query: Annotated[str, Field(min_length=1, description="Search phrase for products to compare.")],
+    limit: Annotated[int, Field(ge=1, le=20, description="Maximum search hits to compare (1–20).")] = 10,
+    reviews_limit: Annotated[int, Field(ge=1, le=20, description="Maximum reviews to read per card (1–20).")] = 10,
+    sort: SearchSort = "popular",
+) -> ProductComparison:
+    """Read-only search and compact comparison of products in one call.
+    Reviews and their totals belong to a shared card, not necessarily the SKU:
+    review_groups are referenced by products.reviews_ref and can be shared by
+    variants. Review sku is only set when Ozon explicitly supplies itemId.
+    Individual failures are listed in each product's errors; use the granular
+    product_details(), delivery_estimate(), get_reviews() for drill-down.
+    """
+    return await comparison.compare_products(query, limit, reviews_limit, sort)
 
 
 @mcp.tool()

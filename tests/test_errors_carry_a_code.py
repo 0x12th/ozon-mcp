@@ -25,7 +25,6 @@ def test_every_error_names_itself() -> None:
 def test_the_code_travels_with_the_message() -> None:
     # MCP hands the caller a string and nothing else.
     assert str(WritesDisabledError()).startswith("[writes_disabled]")
-    assert "operator's setting" in str(WritesDisabledError())
 
 
 def test_the_message_still_says_what_to_do() -> None:

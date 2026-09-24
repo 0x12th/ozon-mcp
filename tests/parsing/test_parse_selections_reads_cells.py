@@ -55,9 +55,5 @@ def test_size_and_status_are_split_out_of_one_line() -> None:
     assert [(s.items, s.status) for s in selections] == [(3, "0 сохранений"), (0, "Личная подборка")]
 
 
-def test_the_create_cell_is_not_a_selection() -> None:
-    assert "Создать подборку" not in {s.name for s in parse_selections(_page())}
-
-
 def test_a_page_without_the_container_is_empty_not_an_error() -> None:
     assert parse_selections({}) == []

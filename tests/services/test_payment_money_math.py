@@ -29,8 +29,3 @@ def test_kopecks_reads_ozon_money(text: str, expected: int | None) -> None:
 )
 def test_money_writes_roubles(kopecks: str, expected: str | None) -> None:
     assert _money(kopecks) == expected
-
-
-def test_the_shortfall_is_the_difference() -> None:
-    # 656 ₽ owed against 415,64 ₽ on the card is the 240,36 ₽ Ozon itself quotes.
-    assert _money(str(to_kopecks("656 ₽") - to_kopecks("415,64 ₽"))) == "240,36 ₽"

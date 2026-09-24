@@ -2,6 +2,7 @@
 
 from ozon_mcp.utils.observability.metrics import (
     BROWSER_ACTIVE,
+    COMPARISON_FALLBACKS,
     METRICS_PATH,
     SESSION_BOOTSTRAPS,
     UPSTREAM_LATENCY,
@@ -11,6 +12,7 @@ from ozon_mcp.utils.observability.metrics import (
 
 __all__ = [
     "BROWSER_ACTIVE",
+    "COMPARISON_FALLBACKS",
     "METRICS_PATH",
     "SESSION_BOOTSTRAPS",
     "UPSTREAM_LATENCY",

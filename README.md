@@ -57,6 +57,7 @@ login — makes the others wait.
 | Tool | |
 |---|---|
 | `search` | Storefront search by text and/or category slug, with sort, facet filters and a depth `limit` |
+| `compare_products` | Read-only comparison from one query (up to 20 hits): compact cards, delivery and bounded reviews; `products[].reviews_ref` points to a shared `review_groups[].sku` pool when variants share a card. Individual source errors stay on each product. |
 | `get_search_filters` | Facets available for a query, and the values `search` takes |
 | `product_details` | Card: price, variants (each with its own sku), characteristics, photos; description and reviews on request |
 | `get_reviews` | Rating, review count, the breakdown per star, and reviews to any depth (`sort="worst"` for the complaints) |
@@ -220,6 +221,8 @@ different answers.
 
 ## Configuration
 
+`OZON_*` variables are read once at process startup; changes (including allowed hosts and write permissions) require a restart. There is no runtime config reload.
+
 | Variable | Default | |
 |---|---|---|
 | `OZON_PROFILE_DIR` | `/data/profile` | Persistent Chromium profile holding the session |
@@ -273,7 +276,8 @@ uv run python -m ozon_mcp   # needs a display or Xvfb
 
 Under `http` and `sse` the same port serves Prometheus metrics at `/metrics`: upstream
 request outcomes and latency, antibot re-challenges, session bootstraps, browser
-state.
+state, and `ozon_mcp_comparison_fallbacks_total{reason="snapshot|read"}` when a
+comparison has to use serial reads.
 
 ## Session lifetime
 

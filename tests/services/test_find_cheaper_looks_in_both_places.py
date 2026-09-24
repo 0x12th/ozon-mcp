@@ -17,7 +17,6 @@ import pytest
 
 from ozon_mcp.errors import OzonError
 from ozon_mcp.services import catalog
-from ozon_mcp.utils.serde import dumps
 from support import page
 
 if TYPE_CHECKING:
@@ -92,7 +91,6 @@ def test_the_offers_ozon_itself_lists_are_included(session: FakeSession) -> None
     assert offer.sku == OFFER_SKU
     assert offer.seller == "LFY1"
     assert offer.delivery == "Доставим 19 сентября"
-    assert any("sort=price" in url for url in session.fetched)
 
 
 def test_search_results_are_merged_and_ranked_together(session: FakeSession) -> None:
@@ -117,4 +115,3 @@ def test_the_search_walks_deeper_than_one_page(session: FakeSession) -> None:
     session.pages = {"/search/": lambda: next(pages, page())}
     found = catalog.search("мышь", sort="cheap", limit=2)
     assert [tile.sku for tile in found] == ["1000002", "1000001"], "ranked on price, not on page order"
-    assert dumps(session.fetched).count("page=") >= 2

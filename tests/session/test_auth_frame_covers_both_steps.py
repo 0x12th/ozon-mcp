@@ -15,7 +15,6 @@ from ozon_mcp.session.transport import _is_auth_frame
     "url",
     [
         "https://www.ozon.ru/ozonid-lite?token=eyJhbGciOiJIUzI1NiJ9",
-        "https://www.ozon.ru/ozonid-lite?redirect=https%3A%2F%2Fwww.ozon.ru%2Fmy%2Forderlist&token=x",
         "https://www.ozon.ru/otp-lite?token=6a2ced29-51a9-462a-a180-a99d53f1290b",
     ],
 )

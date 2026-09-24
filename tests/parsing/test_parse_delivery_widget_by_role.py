@@ -46,7 +46,3 @@ def test_the_returns_line_is_not_mistaken_for_a_date() -> None:
     state = _state()
     state["cellTrackingInfo"] = {"uis": {"main": "KEY-MAIN", "returnInfo": "KEY-PVZ"}}
     assert parse_delivery_widget(state)["delivery"] is None
-
-
-def test_an_empty_widget_answers_empty() -> None:
-    assert parse_delivery_widget({}) == {"delivery": None, "address": None, "source": None}

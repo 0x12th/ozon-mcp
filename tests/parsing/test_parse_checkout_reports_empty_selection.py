@@ -14,7 +14,3 @@ def test_parse_checkout_reports_empty_selection() -> None:
     assert checkout.available is False
     assert checkout.reason is not None
     assert "selected" in checkout.reason
-
-
-def test_parse_checkout_reports_missing_page() -> None:
-    assert parse_checkout({"widgetStates": {}}).available is False

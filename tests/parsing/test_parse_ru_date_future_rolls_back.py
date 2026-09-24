@@ -25,6 +25,7 @@ def test_parse_ru_date_future_rolls_back() -> None:
         "ноября",
         "декабря",
     ]
+    assert parse_ru_date(f"Получен {today.day} {months[today.month]}") == today.isoformat()
     text = f"Получен {tomorrow.day} {months[tomorrow.month]}"
     parsed = parse_ru_date(text)
     assert parsed is not None

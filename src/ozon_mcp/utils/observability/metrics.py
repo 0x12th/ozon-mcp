@@ -38,6 +38,12 @@ BROWSER_ACTIVE: Final = Gauge(
     "1 while a Chromium instance is held open, 0 when only HTTP is live.",
 )
 
+COMPARISON_FALLBACKS: Final = Counter(
+    "ozon_mcp_comparison_fallbacks_total",
+    "Comparison reads switched to the serial session, by reason.",
+    ["reason"],
+)
+
 
 def metrics_endpoint(_request: Request) -> Response:
     """Scrape endpoint; sync so Starlette runs the blocking encode off the loop."""

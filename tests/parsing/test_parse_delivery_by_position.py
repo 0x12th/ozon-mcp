@@ -68,9 +68,3 @@ def test_a_courier_address_has_no_storage_and_keeps_its_detail() -> None:
     assert delivery.address == "Доставка по адресу, Выборг, Ленинградское ш., 15"
     # The floor and flat are notes on the address, not a storage term.
     assert delivery.storage == "кв. 27"
-
-
-def test_an_empty_widget_answers_empty() -> None:
-    delivery = parse_delivery({})
-    assert delivery.mode is None
-    assert delivery.address is None

@@ -1,5 +1,7 @@
 """Catalog DTOs: search tiles, product cards, reviews, facets."""
 
+from __future__ import annotations
+
 from pydantic import Field
 
 from ozon_mcp.models.base import OzonModel
@@ -113,6 +115,7 @@ class Review(OzonModel):
         default=None,
         description="Which variant it is about — Ozon shows one card's reviews across its sizes and colours.",
     )
+    sku: str | None = Field(default=None, description="Ozon's review itemId, when it identifies a numeric SKU.")
     purchased: bool | None = Field(default=None, description="Whether Ozon marks the author as having bought it.")
 
 
@@ -172,6 +175,52 @@ class ProductCard(OzonModel):
     description: str | None = None
     description_images: list[str] = Field(default_factory=list)
     reviews: Reviews | None = None
+
+
+class ComparisonReview(OzonModel):
+    sku: str | None = None
+    variant: str | None = None
+    score: int | None = None
+    positive: str | None = None
+    negative: str | None = None
+    text: str | None = None
+
+
+class ComparisonReviews(OzonModel):
+    """One review pool; count and rating belong to the card, not an individual SKU."""
+
+    sku: str
+    rating: float | None = None
+    count: int | None = None
+    reviews: list[ComparisonReview] = Field(default_factory=list)
+    error: str | None = None
+
+
+class ComparisonDelivery(OzonModel):
+    delivery: str | None = None
+    address: str | None = None
+    source: str | None = None
+
+
+class ComparedProduct(OzonModel):
+    sku: str
+    title: str | None = None
+    url: str | None = None
+    price: str | None = None
+    price_regular: str | None = None
+    available: bool | None = None
+    delivery: ComparisonDelivery | None = None
+    characteristics: list[Characteristic] = Field(default_factory=list)
+    rating: float | None = None
+    reviews_count: int | None = None
+    reviews_ref: str | None = Field(default=None, description="SKU of the card's review pool in review_groups.")
+    errors: list[str] = Field(default_factory=list)
+
+
+class ProductComparison(OzonModel):
+    query: str
+    products: list[ComparedProduct] = Field(default_factory=list)
+    review_groups: list[ComparisonReviews] = Field(default_factory=list)
 
 
 class Description(OzonModel):

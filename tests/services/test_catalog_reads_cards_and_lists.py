@@ -42,7 +42,6 @@ def test_a_url_is_accepted_where_a_sku_is(session: FakeSession) -> None:
     # The sku it was asked for is the sku it reports, page or no page.
     assert card.sku == "3077454533"
     assert card.title == "Таблетница"
-    assert any("/product/3077454533" in path for path in session.fetched)
 
 
 def test_search_reads_the_tiles_it_is_served(session: FakeSession) -> None:

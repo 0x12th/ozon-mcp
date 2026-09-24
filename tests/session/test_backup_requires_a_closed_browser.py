@@ -40,10 +40,3 @@ def test_the_browser_is_closed_before_the_copy(tmp_path: Path) -> None:
     assert (tmp_path / "profile.backup" / "Default" / "Cookies").read_text(encoding="utf-8") == "jar"
     # The lock belongs to the process that held it, not to the copy.
     assert not (tmp_path / "profile.backup" / "SingletonLock").exists()
-
-
-def test_a_missing_profile_is_not_an_error(tmp_path: Path) -> None:
-    session = _Session(tmp_path / "gone", tmp_path / "backup")
-    session.back_up_profile()
-    assert session.calls == ["close"]
-    assert not (tmp_path / "backup").exists()

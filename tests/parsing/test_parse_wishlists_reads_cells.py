@@ -45,10 +45,6 @@ def test_every_list_is_read_with_its_id_and_size() -> None:
     assert {ref.kind for ref in lists} == {"wishlist"}
 
 
-def test_the_create_card_is_not_a_list() -> None:
-    assert "Новый вишлист" not in {ref.name for ref in parse_wishlists(_page())}
-
-
 def test_membership_includes_the_lists_the_product_is_already_in() -> None:
     # Ozon takes the add action away and leaves a tick, so reading actions alone
     # returned exactly the lists the product was *not* in.

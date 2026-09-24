@@ -30,7 +30,10 @@ from ozon_mcp.models.orders import OrderProduct
 from ozon_mcp.parsing import catalog as parse
 from ozon_mcp.parsing.common import declared_counter, next_pages
 from ozon_mcp.parsing.orders import ORDER_NUMBER_RE, order_numbers_from_link, parse_order_products
+from ozon_mcp.session.transport import OzonSession, ReadSnapshot
 from ozon_mcp.utils.serde import dumps
+
+type CatalogSession = OzonSession | ReadSnapshot
 
 _MAX_TILE_PAGES: Final = 200
 # Deep enough to walk past the first pages, bounded so one query cannot crawl
@@ -154,6 +157,7 @@ def product_details(
     *,
     with_description: bool = False,
     with_reviews: bool = False,
+    session: CatalogSession | None = None,
 ) -> ProductCard:
     """The product card, optionally with its description and reviews.
 
@@ -161,7 +165,8 @@ def product_details(
     "what is this and what does it cost" stays a single request.
     """
     sku = _sku(sku_or_url)
-    card = parse.parse_product(get_session().fetch(f"/product/{sku}/"))
+    client = session or get_session()
+    card = parse.parse_product(client.fetch(f"/product/{sku}/"))
     # The card is asked for by sku, so that is the sku it has — the page does not
     # always repeat it, and answering None for what the caller just passed in is
     # no help to anyone.
@@ -171,7 +176,7 @@ def product_details(
         card.description = described.description
         card.description_images = described.images
     if with_reviews:
-        card.reviews = get_reviews(sku)
+        card.reviews = get_reviews(sku, session=client)
     return card
 
 
@@ -179,7 +184,9 @@ def get_photos(sku_or_url: str) -> list[str]:
     return parse.parse_gallery(get_session().fetch(f"/product/{_sku(sku_or_url)}/"))
 
 
-def get_reviews(sku_or_url: str, limit: int = 30, sort: str = "useful") -> Reviews:
+def get_reviews(
+    sku_or_url: str, limit: int = 30, sort: str = "useful", *, session: CatalogSession | None = None
+) -> Reviews:
     """A product's rating, the breakdown per star, and ``limit`` reviews.
 
     Ozon serves reviews thirty at a time and states the total separately, so the
@@ -192,9 +199,9 @@ def get_reviews(sku_or_url: str, limit: int = 30, sort: str = "useful") -> Revie
     colour; each one says which.
     """
     sku = _sku(sku_or_url)
-    session = get_session()
+    client = session or get_session()
     path = f"/product/{sku}/reviews/?sort={REVIEW_SORTS.get(sort, sort)}"
-    data = session.fetch(path)
+    data = client.fetch(path)
     answer = parse.parse_reviews(data)
     seen = {(review.author, review.date, review.text) for review in answer.reviews}
     for _ in range(_MAX_REVIEW_PAGES):
@@ -203,7 +210,7 @@ def get_reviews(sku_or_url: str, limit: int = 30, sort: str = "useful") -> Revie
         following = (parse.reviews_next_page(data) or "").strip()
         if not following:
             break
-        data = session.fetch(f"/product/{sku}/reviews/{following}")
+        data = client.fetch(f"/product/{sku}/reviews/{following}")
         page = parse.parse_reviews(data)
         fresh = [review for review in page.reviews if (review.author, review.date, review.text) not in seen]
         if not fresh:
@@ -228,7 +235,7 @@ def get_description(sku_or_url: str) -> Description:
     return parse.parse_description(sku, data)
 
 
-def delivery_estimate(sku_or_url: str) -> DeliveryEstimate:
+def delivery_estimate(sku_or_url: str, *, session: CatalogSession | None = None) -> DeliveryEstimate:
     """Delivery estimate for a product, relative to the account's address.
 
     Served by the per-widget endpoint, which is ~100x faster than rendering the
@@ -237,10 +244,11 @@ def delivery_estimate(sku_or_url: str) -> DeliveryEstimate:
     """
     sku = _sku(sku_or_url)
     async_data = base64.b64encode(dumps({"ci": WEB_DELIVERY_CI, "url": f"/product/{sku}/"}).encode()).decode()
-    state = get_session().widget_state(WEB_DELIVERY_STATE_ID, async_data).get("state")
+    client = session or get_session()
+    state = client.widget_state(WEB_DELIVERY_STATE_ID, async_data).get("state")
     if state:
         return DeliveryEstimate(sku=sku, **parse.parse_delivery_widget(state))
-    delivery = get_session().page_extract(f"/product/{sku}/", _DELIVERY_JS)
+    delivery = client.page_extract(f"/product/{sku}/", _DELIVERY_JS)
     return DeliveryEstimate(sku=sku, delivery=delivery)
 
 

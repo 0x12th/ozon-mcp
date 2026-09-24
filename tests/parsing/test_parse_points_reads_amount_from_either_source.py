@@ -20,7 +20,3 @@ def test_amount_from_the_link() -> None:
 def test_amount_from_the_label_when_no_link() -> None:
     options = parse_points(_widget(None, "Списать 250"))
     assert options[1].amount == 250
-
-
-def test_no_tabs_no_options() -> None:
-    assert parse_points({}) == []

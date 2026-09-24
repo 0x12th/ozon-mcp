@@ -1,8 +1,6 @@
 """Dependency-injection factories (no bare module-level singletons)."""
 
 import asyncio
-import atexit
-import contextlib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import cache
@@ -12,22 +10,8 @@ from ozon_mcp.session.transport import OzonSession
 
 @cache
 def get_session() -> OzonSession:
-    """The process-wide OZON session; disposed via ``get_session.cache_clear()``.
-
-    Closing it at process exit is not housekeeping: Chromium owns the profile
-    and only writes its cookie jar out when it shuts down, so a process that
-    just dies loses every token rotated during the run — and, once, a login
-    that had already succeeded.
-    """
-    session = OzonSession()
-
-    def flush() -> None:
-        # Interpreter shutdown is a hostile place to raise from.
-        with contextlib.suppress(Exception):
-            session.close()
-
-    atexit.register(flush)
-    return session
+    """The process-wide session, closed on its worker thread by ``close_session``."""
+    return OzonSession()
 
 
 @cache
@@ -46,3 +30,11 @@ def get_executor() -> ThreadPoolExecutor:
 async def run_blocking[T](work: Callable[[], T]) -> T:
     """Await blocking session work off the event loop."""
     return await asyncio.get_running_loop().run_in_executor(get_executor(), work)
+
+
+def close_session() -> None:
+    """Flush cookies and close Chromium on its owning thread, if it was used."""
+    if not get_session.cache_info().currsize:
+        return
+    get_executor().submit(get_session().close).result()
+    get_session.cache_clear()

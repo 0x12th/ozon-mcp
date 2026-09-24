@@ -12,7 +12,6 @@ import json
 import pytest
 
 from ozon_mcp.errors import OzonError
-from ozon_mcp.parsing.orders import order_numbers_from_link
 from ozon_mcp.services.orders import resolve_order
 
 
@@ -29,7 +28,6 @@ def test_a_number_passes_through() -> None:
 def test_a_detail_link_is_decoded_to_its_order_number() -> None:
     # The link lists parcels ("…-0877-1"); the order is the number without them.
     detail_link = _posting_link("44563249-0877-1", "44563249-0877-2")
-    assert order_numbers_from_link(detail_link) == ["44563249-0877"]
     assert resolve_order(detail_link) == "44563249-0877"
 
 

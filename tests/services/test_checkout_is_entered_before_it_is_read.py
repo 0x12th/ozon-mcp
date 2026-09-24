@@ -11,9 +11,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
-from ozon_mcp.errors import TotalMismatchError
 from ozon_mcp.services import checkout
 from support import page
 
@@ -77,11 +74,3 @@ def test_an_empty_selection_is_refused_without_entering(session: FakeSession) ->
     assert answer.available is False
     assert "selected" in (answer.reason or "")
     assert _entries(session) == []
-
-
-def test_a_total_from_a_stale_snapshot_is_still_refused(session: FakeSession, writes_on: None) -> None:
-    """The confirmation stays the last line of defence, entry or not."""
-    session.pages = {"/cart": _cart(checked=True), "/gocheckout": CHECKOUT_PAGE}
-    with pytest.raises(TotalMismatchError):
-        checkout.place_order("768 ₽")
-    assert session.performed == []

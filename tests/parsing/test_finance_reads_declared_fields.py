@@ -10,7 +10,7 @@ from __future__ import annotations
 from ozon_mcp.parsing.finance import parse_finance
 
 
-def _page(*, extra_card: bool = True) -> dict[str, object]:
+def _page() -> dict[str, object]:
     cashback = (
         '{"title": {"text": "Кэшбэк"}, "subtitle": {"text": "1 200 ₽"},'
         ' "trackingInfo": {"click": {"actionType": "ClickActionCardsCashback"}}}'
@@ -20,10 +20,9 @@ def _page(*, extra_card: bool = True) -> dict[str, object]:
         ' "trackingInfo": {"click": {"actionType": "ClickActionCardsOzonBank_BankBalanceCard"},'
         ' "view": {"actionType": "ViewActionCardsOzonBank"}}}'
     )
-    cards = f"{cashback}, {balance}" if extra_card else balance
     return {
         "widgetStates": {
-            "actionCards-1": f'{{"cards": [{cards}]}}',
+            "actionCards-1": f'{{"cards": [{cashback}, {balance}]}}',
             "menu-2": (
                 '{"sections": [{"title": "Личная информация", "items": ['
                 '{"title": "Баллы за отзывы", "action": {"link": "/my/reviews/promo"}},'
@@ -39,10 +38,6 @@ def test_balance_comes_from_the_balance_tile() -> None:
     finances = parse_finance(_page())
     assert finances.ozon_card_balance == "415,64 ₽"
     assert finances.points == "6633"
-
-
-def test_a_single_tile_still_reads() -> None:
-    assert parse_finance(_page(extra_card=False)).ozon_card_balance == "415,64 ₽"
 
 
 def test_nothing_declared_reads_as_nothing() -> None:

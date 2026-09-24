@@ -12,6 +12,7 @@ import logging
 import uvicorn
 from starlette.routing import Route
 
+from ozon_mcp.dependencies import close_session
 from ozon_mcp.main import mcp
 from ozon_mcp.settings import get_settings
 from ozon_mcp.utils.observability import METRICS_PATH, metrics_endpoint
@@ -28,23 +29,26 @@ def _configure_logging() -> None:
 def main() -> None:
     _configure_logging()
     settings = get_settings()
-    if settings.transport == "stdio":
-        mcp.run()
-        return
+    try:
+        if settings.transport == "stdio":
+            mcp.run()
+            return
 
-    # /mcp is streamable HTTP, what clients use now; /sse is the older transport
-    # the spec has deprecated, kept for clients that still speak only that.
-    streaming = settings.transport == "http"
-    app = mcp.streamable_http_app() if streaming else mcp.sse_app()
-    app.routes.append(Route(METRICS_PATH, metrics_endpoint))
-    logger.info(
-        "serving mcp on http://%s:%s%s (metrics at %s)",
-        settings.host,
-        settings.port,
-        "/mcp" if streaming else "/sse",
-        METRICS_PATH,
-    )
-    uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
+        # /mcp is streamable HTTP, what clients use now; /sse is the older transport
+        # the spec has deprecated, kept for clients that still speak only that.
+        streaming = settings.transport == "http"
+        app = mcp.streamable_http_app() if streaming else mcp.sse_app()
+        app.routes.append(Route(METRICS_PATH, metrics_endpoint))
+        logger.info(
+            "serving mcp on http://%s:%s%s (metrics at %s)",
+            settings.host,
+            settings.port,
+            "/mcp" if streaming else "/sse",
+            METRICS_PATH,
+        )
+        uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
+    finally:
+        close_session()
 
 
 if __name__ == "__main__":

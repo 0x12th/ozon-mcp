@@ -234,6 +234,7 @@ def parse_reviews(data: dict[str, Any]) -> Reviews:
                 unuseful=usefulness.get("unuseful"),
                 answers=(review.get("comments") or {}).get("totalCount"),
                 variant=_variant_of(product),
+                sku=str(review["itemId"]) if str(review.get("itemId") or "").isdigit() else None,
                 purchased=review.get("isItemPurchased") if isinstance(review.get("isItemPurchased"), bool) else None,
             )
         )

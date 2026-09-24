@@ -18,6 +18,7 @@ cookies rotated on the HTTP side are pushed back into the live context: Chrome
 then flushes them to disk, and the refresh chain survives a restart.
 """
 
+import copy
 import logging
 import re
 import secrets
@@ -25,8 +26,10 @@ import shutil
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
+from http.cookiejar import Cookie, CookieJar
 from pathlib import Path
-from typing import Any, Final, Self
+from typing import Any, Final, Literal, Self
 from urllib.parse import quote
 
 from curl_cffi import requests as curl_requests
@@ -425,6 +428,20 @@ class OzonSession:
         data.setdefault("_httpStatus", status)
         return data
 
+    def snapshot_reads(self) -> "ReadSnapshot":
+        """Capture an isolated HTTP read adapter on the session's owning thread.
+
+        Call this via run_blocking, before dispatching worker threads. Workers
+        never access the browser, the live curl session, or its cookie jar.
+        """
+        with self._lock:
+            self._ensure_http()
+            cookies = tuple(copy.deepcopy(cookie) for cookie in self._http.cookies.jar)
+            users = [cookie.value for cookie in cookies if cookie.name == "__Secure-user-id"]
+            if not users or any(user in {"", _GUEST_USER_ID} for user in users):
+                raise SessionExpiredError
+            return ReadSnapshot(tuple(self._headers.items()), cookies, self._impersonate)
+
     def fetch(self, path: str, backend: Backend = "composer") -> dict[str, Any]:
         """Fetch a page's JSON by on-site path. backend: composer | entrypoint.
 
@@ -621,3 +638,113 @@ class OzonSession:
 def _excerpt(text: str) -> str:
     """A slice of a failing response, with the whitespace collapsed."""
     return " ".join((text or "").split())[:_EXCERPT_CHARS]
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ReadSnapshot:
+    """Read-only HTTP view of one authenticated session, safe to share with workers.
+
+    The captured credentials are fixed; a response that tries to rotate login
+    cookies is rejected rather than silently losing the new tokens. Re-snapshot
+    on the owning thread after the original serial transport has recovered.
+    """
+
+    _headers: tuple[tuple[str, str], ...]
+    _cookies: tuple[Cookie, ...]
+    _impersonate: str
+
+    def _auth_cookie_changed(self, response: Any, jar: CookieJar) -> bool:
+        """Reject even transient auth rotations, including cookie deletions."""
+        set_cookies = (
+            response.headers.get_list("set-cookie")
+            if hasattr(response.headers, "get_list")
+            else [response.headers.get("set-cookie", "")]
+        )
+        if any(
+            re.search(r"(?:^|,)\s*" + re.escape(name) + r"\s*=", header, re.IGNORECASE)
+            for header in set_cookies
+            for name in _SESSION_COOKIES
+        ):
+            return True
+        before = sorted(
+            (c.name, c.domain, c.path, c.value, c.expires) for c in self._cookies if c.name in _SESSION_COOKIES
+        )
+        after = sorted((c.name, c.domain, c.path, c.value, c.expires) for c in jar if c.name in _SESSION_COOKIES)
+        return before != after
+
+    @staticmethod
+    def _read_page(text: str, status: int) -> dict[str, Any]:
+        try:
+            data = loads(text)
+        except ValueError as exc:
+            raise UpstreamError(status, "Invalid JSON response") from exc
+        if not isinstance(data, dict) or data.get("error") or data.get("errorForUser"):
+            raise UpstreamError(status, "Ozon did not return a readable page")
+        data.setdefault("_httpStatus", status)
+        return data
+
+    def _request(
+        self, method: Literal["GET", "POST"], url: str, body: object = None, backend: Backend = "composer"
+    ) -> dict[str, Any]:
+        started = time.monotonic()
+        status, outcome = 0, "failed"
+        http = curl_requests.Session(impersonate=self._impersonate)
+        try:
+            for cookie in self._cookies:
+                http.cookies.jar.set_cookie(copy.deepcopy(cookie))
+            headers = dict(self._headers)
+            headers["accept"] = "application/json"
+            if body is not None:
+                headers["content-type"] = "application/json"
+            try:
+                response = http.request(
+                    method,
+                    url,
+                    headers=headers,
+                    timeout=get_settings().request_timeout,
+                    data=dumps(body) if body is not None else None,
+                    allow_redirects=False,
+                )
+            except Exception as exc:
+                logger.debug("parallel read transport error on %s", url, exc_info=True)
+                raise UpstreamError(0) from exc
+
+            status, text = response.status_code, response.text
+            outcome = _outcome(status)
+            # Checking Set-Cookie as well as the jar catches transient rotations.
+            if self._auth_cookie_changed(response, http.cookies.jar):
+                outcome = "failed"
+                raise OzonError("Parallel read changed authentication cookies; retry on the original serial session")
+            if status in {403, 307} or "incidentId" in text or "abt-challenge" in text:
+                outcome = "rechallenge"
+                raise UpstreamError(status, "Antibot challenge; retry on the original serial session")
+            if status == _TOO_MANY_REQUESTS:
+                retry_after = str(response.headers.get("Retry-After") or "").strip()
+                try:
+                    wait = float(retry_after)
+                except ValueError:
+                    wait = None
+                raise RateLimitedError(wait)
+            if not 200 <= status < 300:
+                raise UpstreamError(status, _excerpt(text))
+            outcome = "failed"
+            data = self._read_page(text, status)
+            outcome = "ok"
+            return data
+        finally:
+            UPSTREAM_LATENCY.labels(backend=backend).observe(time.monotonic() - started)
+            UPSTREAM_REQUESTS.labels(backend=backend, outcome=outcome).inc()
+            http.close()
+
+    def fetch(self, path: str, backend: Backend = "composer") -> dict[str, Any]:
+        """Fetch a page with the same URL escaping as the serial transport."""
+        base = ENTRYPOINT_URL if backend == "entrypoint" else COMPOSER_URL
+        return self._request("GET", base + quote(path, safe="/?=&%"), backend=backend)
+
+    def widget_state(self, state_id: str, async_data: str) -> dict[str, Any]:
+        """Read one lazily-loaded widget using an isolated HTTP session."""
+        return self._request("POST", WIDGET_URL + quote(state_id, safe=""), body={"asyncData": async_data})
+
+    def page_extract(self, path: str, js: str, *, scroll: bool = False) -> Any:  # ruff: ignore[unused-method-argument]
+        """DOM fallback cannot run in workers; use the original serial session."""
+        raise OzonError("page_extract needs Playwright; retry on the original serial session")

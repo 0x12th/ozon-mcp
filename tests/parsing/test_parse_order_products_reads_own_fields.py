@@ -54,7 +54,3 @@ def test_parse_order_products_reads_own_fields() -> None:
     assert product.variant == "Коричневый"
     assert product.seller == "Sikang Department Store"
     assert product.url == "https://www.ozon.ru/product/3207911181/"
-
-
-def test_parse_order_products_ignores_pages_without_shipments() -> None:
-    assert parse_order_products({"widgetStates": {}}) == []

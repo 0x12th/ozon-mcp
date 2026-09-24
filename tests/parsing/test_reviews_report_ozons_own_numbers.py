@@ -76,6 +76,7 @@ def test_a_review_keeps_its_parts_apart_and_names_its_variant() -> None:
     assert review.purchased is True
     # A card's reviews cover its variants, so the review says which one.
     assert review.variant == "Размер, см: 30x30, Цвет товара: серый"
+    assert review.sku == "2854991259"
     assert review.photos == ["https://ir.ozone.ru/s3/rp-photo-13/a.jpeg"]
 
 

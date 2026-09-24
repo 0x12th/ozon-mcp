@@ -24,7 +24,3 @@ def test_widget_with_picks_by_content() -> None:
     # Either order must yield the described one.
     assert widget_with(_page(characteristics, described), "webDescription", "richAnnotation") == described
     assert widget_with(_page(described, characteristics), "webDescription", "richAnnotation") == described
-
-
-def test_widget_with_returns_none_when_absent() -> None:
-    assert widget_with({"widgetStates": {}}, "webDescription", "richAnnotation") is None

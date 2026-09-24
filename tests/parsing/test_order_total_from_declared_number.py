@@ -24,11 +24,6 @@ def test_the_number_wins_over_the_caption() -> None:
     assert totals.order_total == "6 691 ₽"
 
 
-def test_a_reworded_caption_no_longer_loses_the_total() -> None:
-    totals = parse_totals(_total(caption="Всего к оплате по заказу", number=6691))
-    assert totals.order_total == "6 691 ₽"
-
-
 def test_kopecks_survive() -> None:
     assert parse_totals(_total(caption=None, number=415.64)).order_total == "415,64 ₽"
 

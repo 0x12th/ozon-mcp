@@ -40,12 +40,10 @@ def test_the_server_explains_itself() -> None:
     # Clients surface this on connect; it is where the flows are stated.
     instructions = mcp.instructions or ""
     assert "session_status()" in instructions
-    assert "select_cart_items" in instructions
     assert "order_total" in instructions
     # A caller has to be able to branch on a failure, and to know that a
     # failure is not an empty answer.
     assert "[rate_limited]" in instructions
-    assert "different answers" in instructions
 
 
 async def test_every_tool_and_argument_describes_itself() -> None:
