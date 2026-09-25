@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from ozon_mcp.models.base import OzonModel
@@ -178,6 +180,7 @@ class ProductCard(OzonModel):
 
 
 class ComparisonReview(OzonModel):
+    sort: Literal["useful", "worst"] = Field(description="Sorted sample that supplied this review.")
     sku: str | None = None
     variant: str | None = None
     score: int | None = None
@@ -186,18 +189,37 @@ class ComparisonReview(OzonModel):
     text: str | None = None
 
 
+class ReviewCoverage(OzonModel):
+    """SKU-specific depth of one sorted pool; an unmet target does not mean no reviews exist."""
+
+    sort: str
+    scanned: int = 0
+    matched: int = 0
+    meaningful: int = 0
+    unattributed: int = 0
+    target: int = 0
+    pages_scanned: int = 0
+    stop_reason: Literal["target_met", "budget", "source_exhausted", "error"] = Field(
+        description="Why this SKU's sorted sample stopped; budget does not imply no deeper reviews."
+    )
+    complete: bool = False
+    sufficient: bool = False  # Kept for existing clients; equivalent to complete.
+
+
 class ComparisonReviews(OzonModel):
-    """One review pool; count and rating belong to the card, not an individual SKU."""
+    """A sample requested for this SKU; other variants' reviews are not evidence for it."""
 
     sku: str
     rating: float | None = None
     count: int | None = None
     reviews: list[ComparisonReview] = Field(default_factory=list)
+    coverage: list[ReviewCoverage] = Field(default_factory=list)
     error: str | None = None
 
 
 class ComparisonDelivery(OzonModel):
     delivery: str | None = None
+    date: str | None = Field(default=None, description="ISO date if the delivery line states an unambiguous full date.")
     address: str | None = None
     source: str | None = None
 
@@ -213,12 +235,13 @@ class ComparedProduct(OzonModel):
     characteristics: list[Characteristic] = Field(default_factory=list)
     rating: float | None = None
     reviews_count: int | None = None
-    reviews_ref: str | None = Field(default=None, description="SKU of the card's review pool in review_groups.")
+    reviews_ref: str | None = Field(default=None, description="SKU of this product's sample in review_groups.")
     errors: list[str] = Field(default_factory=list)
 
 
 class ProductComparison(OzonModel):
-    query: str
+    query: str | None = None
+    fetched_at: str | None = Field(default=None, description="UTC timestamp shared by this comparison's observations.")
     products: list[ComparedProduct] = Field(default_factory=list)
     review_groups: list[ComparisonReviews] = Field(default_factory=list)
 

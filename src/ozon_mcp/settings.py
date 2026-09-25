@@ -38,6 +38,9 @@ class OzonSettings(BaseSettings):
     request_timeout: float = 30.0
     """Seconds to wait for one HTTP call to Ozon."""
 
+    comparison_timeout: float = 25.0
+    """Wall-clock budget for a comparison; completed reads are returned when it expires."""
+
     request_attempts: int = 3
     """How many times one call is attempted before it is reported as failed."""
 

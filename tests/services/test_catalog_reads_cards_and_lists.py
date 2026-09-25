@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from ozon_mcp.errors import OzonError
 from ozon_mcp.services import catalog, favorites
 from ozon_mcp.utils.serde import dumps
 from support import FakeSession, page
@@ -44,6 +47,16 @@ def test_a_url_is_accepted_where_a_sku_is(session: FakeSession) -> None:
     assert card.title == "Таблетница"
 
 
+def test_description_uses_the_supplied_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    isolated = FakeSession()
+    isolated.pages = {"/product/3077454533": page(**CARD)}
+    monkeypatch.setattr(catalog, "get_session", lambda: (_ for _ in ()).throw(AssertionError("global session used")))
+    card = catalog.product_details("3077454533", with_description=True, session=isolated)
+    assert card.title == "Таблетница"
+    assert len(isolated.fetched) == 2
+    assert "layout_container=pdpPage2column" in isolated.fetched[1]
+
+
 def test_search_reads_the_tiles_it_is_served(session: FakeSession) -> None:
     session.pages = {"/search": _tiles("1", "2")}
     found = catalog.search("таблетница")
@@ -60,6 +73,12 @@ def test_the_walk_stops_at_the_count_the_page_displays(session: FakeSession) -> 
         "layout_page_index=2": _tiles("3", "4"),
     }
     assert [tile.sku for tile in favorites.list_favorites(100)] == ["1", "2"]
+
+
+def test_comparison_delivery_does_not_start_a_browser_on_missing_widget(session: FakeSession) -> None:
+    with pytest.raises(OzonError, match="Delivery widget unavailable"):
+        catalog.delivery_estimate("3077454533", allow_browser_fallback=False)
+    assert not any(path.startswith("render:") for path in session.fetched)
 
 
 def test_a_delivery_estimate_names_what_it_is_relative_to(session: FakeSession) -> None:

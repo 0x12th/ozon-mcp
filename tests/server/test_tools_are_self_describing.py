@@ -46,6 +46,21 @@ def test_the_server_explains_itself() -> None:
     assert "[rate_limited]" in instructions
 
 
+async def test_comparison_guidance_is_visible_to_clients() -> None:
+    instructions = mcp.instructions or ""
+    assert "compare_products()" in instructions
+    assert "gaps" in instructions
+    assert "contradictions" in instructions
+    assert "finalists" in instructions
+    assert "fetching the same product data twice" in instructions
+
+    by_name = {tool.name: tool.description or "" for tool in await mcp.list_tools()}
+    assert "Prefer this for comparing several products" in by_name["compare_products"]
+    assert "do not fetch the same data again" in by_name["compare_products"]
+    for name in ("search", "product_details", "get_reviews", "delivery_estimate"):
+        assert "compare_products()" in by_name[name] or "compare_products(query)" in by_name[name], name
+
+
 async def test_every_tool_and_argument_describes_itself() -> None:
     tools = await mcp.list_tools()
     assert [tool.name for tool in tools if not (tool.description or "").strip()] == []

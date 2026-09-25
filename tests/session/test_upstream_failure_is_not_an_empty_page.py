@@ -8,12 +8,13 @@ seam the transport is built around — rather than patching its methods.
 
 from __future__ import annotations
 
+import time
 from typing import Any, override
 
 import pytest
 
 from ozon_mcp.errors import RateLimitedError, UpstreamError
-from ozon_mcp.session.transport import OzonSession
+from ozon_mcp.session.transport import OzonSession, comparison_read_limit
 from ozon_mcp.utils.serde import dumps
 
 
@@ -30,8 +31,10 @@ class _Http:
     def __init__(self, *answers: _Response | Exception) -> None:
         self.answers = list(answers)
         self.calls = 0
+        self.timeouts: list[float] = []
 
-    def request(self, *_args: Any, **_kwargs: Any) -> _Response:
+    def request(self, *_args: Any, **kwargs: Any) -> _Response:
+        self.timeouts.append(kwargs["timeout"])
         self.calls += 1
         answer = self.answers[min(self.calls, len(self.answers)) - 1]
         if isinstance(answer, Exception):
@@ -67,6 +70,18 @@ class _Session(OzonSession):
 
 
 PAGE = dumps({"widgetStates": {"orderList-1": "{}"}})
+
+
+def test_comparison_read_limit_bounds_http_and_retries_without_changing_writes() -> None:
+    http = _Http(_Response(502, "unavailable"), _Response(200, PAGE))
+    session = _Session(http)
+    with comparison_read_limit(0.2):
+        with pytest.raises(UpstreamError):
+            session.fetch("/my/orderlist")
+        assert session.action("favoriteCreateList", {})["widgetStates"]
+    assert http.calls == 2
+    assert http.timeouts[0] == pytest.approx(0.2)
+    assert http.timeouts[1] > 0.2
 
 
 def test_a_server_error_raises_instead_of_answering_empty() -> None:
@@ -128,3 +143,49 @@ def test_a_client_error_with_no_json_raises() -> None:
     with pytest.raises(UpstreamError) as raised:
         session.fetch("/my/nope")
     assert raised.value.status == 404
+
+
+@pytest.mark.parametrize(
+    "text", ["<html>login</html>", "not JSON", "[]", '"hello"', '{"error":"denied"}', '{"errorForUser":"denied"}']
+)
+@pytest.mark.parametrize(("read", "args"), [("fetch", ("/my/orderlist",)), ("widget_state", ("state-1", "descriptor"))])
+def test_successful_serial_reads_reject_non_pages(text: str, read: str, args: tuple[str, ...]) -> None:
+    session = _Session(_Http(_Response(200, text)))
+    with pytest.raises(UpstreamError) as raised:
+        getattr(session, read)(*args)
+    assert raised.value.status == 200
+    assert "not an empty account" in str(raised.value)
+
+
+def test_successful_serial_read_returns_page_with_status() -> None:
+    session = _Session(_Http(_Response(200, PAGE)))
+    assert session.fetch("/my/orderlist") == {"widgetStates": {"orderList-1": "{}"}, "_httpStatus": 200}
+
+
+def test_direct_page_conversion_rejects_invalid_read_response() -> None:
+    session = _Session(_Http())
+    with pytest.raises(UpstreamError) as raised:
+        session._page_from("<html>login</html>", 200, "composer", time.monotonic())
+    assert raised.value.status == 200
+
+
+def test_direct_get_request_rejects_error_envelope() -> None:
+    session = _Session(_Http(_Response(200, '{"errorForUser":"denied"}')))
+    with pytest.raises(UpstreamError) as raised:
+        session._request("GET", "https://www.ozon.ru/my/orderlist")
+    assert raised.value.status == 200
+
+
+def test_client_error_json_is_not_a_read_page() -> None:
+    session = _Session(_Http(_Response(400, '{"error":"denied"}')))
+    with pytest.raises(UpstreamError) as raised:
+        session.fetch("/my/orderlist")
+    assert raised.value.status == 400
+
+
+@pytest.mark.parametrize("method", ["action", "post_page"])
+def test_write_response_semantics_remain_unchanged(method: str) -> None:
+    session = _Session(_Http(_Response(200, "<html>not JSON</html>"), _Response(200, '{"error":"refused"}')))
+    write = session.action if method == "action" else session.post_page
+    assert write("favoriteCreateList", {"title": ""}) == {"_httpStatus": 200}
+    assert write("favoriteCreateList", {"title": ""}) == {"error": "refused", "_httpStatus": 200}

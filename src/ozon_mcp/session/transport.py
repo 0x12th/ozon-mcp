@@ -25,7 +25,8 @@ import secrets
 import shutil
 import threading
 import time
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from http.cookiejar import Cookie, CookieJar
 from pathlib import Path
@@ -47,9 +48,27 @@ from ozon_mcp.constants import (
 from ozon_mcp.errors import OzonError, RateLimitedError, SessionExpiredError, UpstreamError
 from ozon_mcp.settings import get_settings
 from ozon_mcp.utils.observability import BROWSER_ACTIVE, SESSION_BOOTSTRAPS, UPSTREAM_LATENCY, UPSTREAM_REQUESTS
+from ozon_mcp.utils.observability.review_probe import _record_active_request
 from ozon_mcp.utils.serde import dumps, loads
 
 logger = logging.getLogger("ozon_mcp")
+_COMPARISON_READ_TIMEOUT = threading.local()
+
+
+class SnapshotInvalidError(OzonError):
+    """The isolated read credentials cannot safely be reused for more reads."""
+
+
+@contextmanager
+def comparison_read_limit(timeout: float) -> Iterator[None]:
+    """Bound comparison HTTP reads on their worker thread, including serial retries."""
+    previous = getattr(_COMPARISON_READ_TIMEOUT, "value", None)
+    _COMPARISON_READ_TIMEOUT.value = timeout
+    try:
+        yield
+    finally:
+        _COMPARISON_READ_TIMEOUT.value = previous
+
 
 _ANTIBOT: Final = re.compile(r"antibot|ограничен|нет соединения|доступ", re.IGNORECASE)
 # Cookies that carry the login; only these are worth syncing back to the browser.
@@ -350,20 +369,18 @@ class OzonSession:
         except ValueError:
             return None
 
-    def _request(self, method: str, url: str, body: object = None, backend: Backend = "composer") -> dict[str, Any]:
-        """One call to Ozon, retried, and never answered with an empty page.
+    def _request(
+        self, method: str, url: str, body: object = None, backend: Backend = "composer", *, read: bool | None = None
+    ) -> dict[str, Any]:
+        """One call to Ozon, retried, without mistaking failed reads for empty pages.
 
-        A failure used to come back as ``{"widgetStates": {}}``, which every
-        parser turns into an empty list — so a 502, a timeout or a rate limit
-        read exactly like an account with no orders. Anything that is not a page
-        now raises instead.
-
-        A 4xx carrying JSON is passed through on purpose: Ozon reports refused
+        A 4xx carrying JSON is passed through for writes: Ozon reports refused
         actions that way ("Пустое название вишлиста"), and the caller needs the
         reason, not an exception.
         """
         settings = get_settings()
-        attempts = max(1, settings.request_attempts)
+        read_limit = getattr(_COMPARISON_READ_TIMEOUT, "value", None) if method == "GET" or read else None
+        attempts = 1 if read_limit is not None else max(1, settings.request_attempts)
         with self._lock:
             status, text, retry_after = 0, "", None
             started = time.monotonic()
@@ -374,12 +391,14 @@ class OzonSession:
                 if body is not None:
                     headers["content-type"] = "application/json"
                 try:
+                    data = dumps(body) if body is not None else None
+                    _record_active_request()
                     response = self._http.request(
                         method,
                         url,
                         headers=headers,
-                        timeout=settings.request_timeout,
-                        data=dumps(body) if body is not None else None,
+                        timeout=read_limit or settings.request_timeout,
+                        data=data,
                     )
                     status, text = response.status_code, response.text
                     retry_after = self._retry_after(response) if status == _TOO_MANY_REQUESTS else None
@@ -399,33 +418,45 @@ class OzonSession:
                         self._sleep_before_retry(attempt, retry_after)
                         continue
                 else:
-                    return self._page_from(text, status, backend, started)
+                    is_read = method == "GET" if read is None else read
+                    return self._page_from(text, status, backend, started, read=is_read)
             UPSTREAM_LATENCY.labels(backend=backend).observe(time.monotonic() - started)
             UPSTREAM_REQUESTS.labels(backend=backend, outcome="failed").inc()
             if status == _TOO_MANY_REQUESTS:
                 raise RateLimitedError(retry_after)
             raise UpstreamError(status, _excerpt(text))
 
-    def _page_from(self, text: str, status: int, backend: Backend, started: float) -> dict[str, Any]:
-        """Turn a served response into a page, or refuse to call it one.
-
-        A 4xx that is not JSON carries nothing a caller can act on — an HTML 404
-        would arrive as an empty page and read as an empty account — so it is
-        raised rather than returned.
-        """
+    def _page_from(
+        self, text: str, status: int, backend: Backend, started: float, *, read: bool = True
+    ) -> dict[str, Any]:
+        """Validate reads strictly; keep write response handling unchanged."""
         UPSTREAM_LATENCY.labels(backend=backend).observe(time.monotonic() - started)
+        if not read:
+            UPSTREAM_REQUESTS.labels(backend=backend, outcome=_outcome(status)).inc()
+            self._last_used = time.time()
+            self.save_state()
+            try:
+                data = loads(text)
+            except ValueError:
+                data = None
+            if not isinstance(data, dict):
+                if status >= _CLIENT_ERROR:
+                    raise UpstreamError(status, _excerpt(text))
+                data = {}
+            data.setdefault("_httpStatus", status)
+            return data
+
+        if not 200 <= status < 300:
+            UPSTREAM_REQUESTS.labels(backend=backend, outcome="failed").inc()
+            raise UpstreamError(status, _excerpt(text))
+        try:
+            data = _read_page(text, status)
+        except UpstreamError:
+            UPSTREAM_REQUESTS.labels(backend=backend, outcome="failed").inc()
+            raise
         UPSTREAM_REQUESTS.labels(backend=backend, outcome=_outcome(status)).inc()
         self._last_used = time.time()
         self.save_state()
-        try:
-            data = loads(text)
-        except ValueError:
-            data = None
-        if not isinstance(data, dict):
-            if status >= _CLIENT_ERROR:
-                raise UpstreamError(status, _excerpt(text))
-            data = {}
-        data.setdefault("_httpStatus", status)
         return data
 
     def snapshot_reads(self) -> "ReadSnapshot":
@@ -452,7 +483,7 @@ class OzonSession:
         felt like: car accessories, for canned tuna.
         """
         base = ENTRYPOINT_URL if backend == "entrypoint" else COMPOSER_URL
-        return self._request("GET", base + quote(path, safe="/?=&%"), backend=backend)
+        return self._request("GET", base + quote(path, safe="/?=&%"), backend=backend, read=True)
 
     def post_page(self, path: str, body: object, backend: Backend = "composer") -> dict[str, Any]:
         """POST a page-level command and get the refreshed page back.
@@ -474,7 +505,7 @@ class OzonSession:
         The page ships such widgets empty; the site then posts a base64
         descriptor of the component to this endpoint to get the real content.
         """
-        return self._request("POST", WIDGET_URL + quote(state_id, safe=""), body={"asyncData": async_data})
+        return self._request("POST", WIDGET_URL + quote(state_id, safe=""), body={"asyncData": async_data}, read=True)
 
     def action(self, action_path: str, body: object) -> dict[str, Any]:
         """POST a composer ``_action/<action_path>`` (body sent as JSON verbatim)."""
@@ -640,6 +671,18 @@ def _excerpt(text: str) -> str:
     return " ".join((text or "").split())[:_EXCERPT_CHARS]
 
 
+def _read_page(text: str, status: int) -> dict[str, Any]:
+    """Require a successful read to contain a JSON page, not an error envelope."""
+    try:
+        data = loads(text)
+    except ValueError as exc:
+        raise UpstreamError(status, "Invalid JSON response") from exc
+    if not isinstance(data, dict) or "error" in data or "errorForUser" in data:
+        raise UpstreamError(status, "Ozon did not return a readable page")
+    data.setdefault("_httpStatus", status)
+    return data
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ReadSnapshot:
     """Read-only HTTP view of one authenticated session, safe to share with workers.
@@ -672,17 +715,6 @@ class ReadSnapshot:
         after = sorted((c.name, c.domain, c.path, c.value, c.expires) for c in jar if c.name in _SESSION_COOKIES)
         return before != after
 
-    @staticmethod
-    def _read_page(text: str, status: int) -> dict[str, Any]:
-        try:
-            data = loads(text)
-        except ValueError as exc:
-            raise UpstreamError(status, "Invalid JSON response") from exc
-        if not isinstance(data, dict) or data.get("error") or data.get("errorForUser"):
-            raise UpstreamError(status, "Ozon did not return a readable page")
-        data.setdefault("_httpStatus", status)
-        return data
-
     def _request(
         self, method: Literal["GET", "POST"], url: str, body: object = None, backend: Backend = "composer"
     ) -> dict[str, Any]:
@@ -697,12 +729,15 @@ class ReadSnapshot:
             if body is not None:
                 headers["content-type"] = "application/json"
             try:
+                timeout = getattr(_COMPARISON_READ_TIMEOUT, "value", None) or get_settings().request_timeout
+                data = dumps(body) if body is not None else None
+                _record_active_request()
                 response = http.request(
                     method,
                     url,
                     headers=headers,
-                    timeout=get_settings().request_timeout,
-                    data=dumps(body) if body is not None else None,
+                    timeout=timeout,
+                    data=data,
                     allow_redirects=False,
                 )
             except Exception as exc:
@@ -714,10 +749,12 @@ class ReadSnapshot:
             # Checking Set-Cookie as well as the jar catches transient rotations.
             if self._auth_cookie_changed(response, http.cookies.jar):
                 outcome = "failed"
-                raise OzonError("Parallel read changed authentication cookies; retry on the original serial session")
+                raise SnapshotInvalidError(
+                    "Parallel read changed authentication cookies; retry on the original serial session"
+                )
             if status in {403, 307} or "incidentId" in text or "abt-challenge" in text:
                 outcome = "rechallenge"
-                raise UpstreamError(status, "Antibot challenge; retry on the original serial session")
+                raise SnapshotInvalidError("Antibot challenge; retry on the original serial session")
             if status == _TOO_MANY_REQUESTS:
                 retry_after = str(response.headers.get("Retry-After") or "").strip()
                 try:
@@ -728,7 +765,7 @@ class ReadSnapshot:
             if not 200 <= status < 300:
                 raise UpstreamError(status, _excerpt(text))
             outcome = "failed"
-            data = self._read_page(text, status)
+            data = _read_page(text, status)
             outcome = "ok"
             return data
         finally:

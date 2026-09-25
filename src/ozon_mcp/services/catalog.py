@@ -31,6 +31,7 @@ from ozon_mcp.parsing import catalog as parse
 from ozon_mcp.parsing.common import declared_counter, next_pages
 from ozon_mcp.parsing.orders import ORDER_NUMBER_RE, order_numbers_from_link, parse_order_products
 from ozon_mcp.session.transport import OzonSession, ReadSnapshot
+from ozon_mcp.utils.observability.review_probe import active_review_probe
 from ozon_mcp.utils.serde import dumps
 
 type CatalogSession = OzonSession | ReadSnapshot
@@ -172,7 +173,7 @@ def product_details(
     # no help to anyone.
     card.sku = card.sku or sku
     if with_description:
-        described = get_description(sku)
+        described = get_description(sku, session=client)
         card.description = described.description
         card.description_images = described.images
     if with_reviews:
@@ -203,6 +204,9 @@ def get_reviews(
     path = f"/product/{sku}/reviews/?sort={REVIEW_SORTS.get(sort, sort)}"
     data = client.fetch(path)
     answer = parse.parse_reviews(data)
+    probe = active_review_probe()
+    if probe is not None:
+        probe.record_page(len(answer.reviews))
     seen = {(review.author, review.date, review.text) for review in answer.reviews}
     for _ in range(_MAX_REVIEW_PAGES):
         if len(answer.reviews) >= limit:
@@ -212,6 +216,8 @@ def get_reviews(
             break
         data = client.fetch(f"/product/{sku}/reviews/{following}")
         page = parse.parse_reviews(data)
+        if probe is not None:
+            probe.record_page(len(page.reviews))
         fresh = [review for review in page.reviews if (review.author, review.date, review.text) not in seen]
         if not fresh:
             break
@@ -223,19 +229,38 @@ def get_reviews(
     return answer
 
 
+def comparison_review_page(
+    sku: str, sort: str, *, session: CatalogSession | None = None, following: str | None = None
+) -> tuple[Reviews, str | None]:
+    product_sku = _sku(sku)
+    path = (
+        f"/product/{product_sku}/reviews/{following}"
+        if following is not None
+        else f"/product/{product_sku}/reviews/?sort={REVIEW_SORTS.get(sort, sort)}"
+    )
+    data = (session or get_session()).fetch(path)
+    reviews = parse.parse_reviews(data)
+    probe = active_review_probe()
+    if probe is not None:
+        probe.record_page(len(reviews.reviews))
+    return reviews, (parse.reviews_next_page(data) or "").strip() or None
+
+
 def get_characteristics(sku_or_url: str) -> list[parse.Characteristic]:
     return parse.parse_characteristics(get_session().fetch(f"/product/{_sku(sku_or_url)}/"))
 
 
-def get_description(sku_or_url: str) -> Description:
+def get_description(sku_or_url: str, *, session: CatalogSession | None = None) -> Description:
     sku = _sku(sku_or_url)
-    data = get_session().fetch(
+    data = (session or get_session()).fetch(
         f"/product/{sku}/?layout_container=pdpPage2column&layout_page_index=2", backend="entrypoint"
     )
     return parse.parse_description(sku, data)
 
 
-def delivery_estimate(sku_or_url: str, *, session: CatalogSession | None = None) -> DeliveryEstimate:
+def delivery_estimate(
+    sku_or_url: str, *, session: CatalogSession | None = None, allow_browser_fallback: bool = True
+) -> DeliveryEstimate:
     """Delivery estimate for a product, relative to the account's address.
 
     Served by the per-widget endpoint, which is ~100x faster than rendering the
@@ -248,6 +273,8 @@ def delivery_estimate(sku_or_url: str, *, session: CatalogSession | None = None)
     state = client.widget_state(WEB_DELIVERY_STATE_ID, async_data).get("state")
     if state:
         return DeliveryEstimate(sku=sku, **parse.parse_delivery_widget(state))
+    if not allow_browser_fallback:
+        raise OzonError("Delivery widget unavailable; use delivery_estimate for a finalist browser check")
     delivery = client.page_extract(f"/product/{sku}/", _DELIVERY_JS)
     return DeliveryEstimate(sku=sku, delivery=delivery)
 

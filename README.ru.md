@@ -234,6 +234,7 @@ Ozon.
 | `OZON_ENABLE_ORDERS` | `0` | Разрешить `place_order` — тратит деньги |
 | `OZON_MONITOR_STORE` | `/data/price_history.json` | Файл истории цен избранного |
 | `OZON_REQUEST_TIMEOUT` | `30` | Секунд на один HTTP-запрос |
+| `OZON_COMPARISON_TIMEOUT` | `25` | Общий бюджет сравнения; возвращает готовые данные и ошибки незавершённых чтений |
 | `OZON_REQUEST_ATTEMPTS` | `3` | Попыток, прежде чем вызов считается провалившимся |
 | `OZON_RETRY_BACKOFF_SECONDS` | `1` | Базовая пауза между попытками, удваивается и джиттерится |
 | `OZON_RETRY_CAP_SECONDS` | `20` | Максимум ожидания, включая `Retry-After` от Ozon |
@@ -253,10 +254,12 @@ docker build -t ozon-mcp .
 # stdio: клиент подключается к stdin/stdout контейнера
 docker run -i --rm --shm-size=1g -v /opt/ozon-mcp:/data ozon-mcp
 
-# http: долгоживущий сервис на :8084 (/mcp + /metrics)
+# http: сервис только для локальных подключений на :8084 (/mcp + /metrics)
 docker run -d --name ozon-mcp --shm-size=1g -v /opt/ozon-mcp:/data \
-  -e OZON_TRANSPORT=http -p 8084:8084 ozon-mcp
+  -e OZON_TRANSPORT=http -p 127.0.0.1:8084:8084 ozon-mcp
 ```
+
+У HTTP-транспорта нет собственной авторизации. Для локального использования публикуйте порт только на loopback: доступ к порту означает доступ к подключённому аккаунту. Пустой `OZON_ALLOWED_HOSTS` не ограничивает клиентов.
 
 `/data` обязан быть бинд-маунтом. Там лежит профиль, а Ozon постоянно ротирует
 сессию: куки, обновившиеся на HTTP-стороне, дописываются обратно в профиль,

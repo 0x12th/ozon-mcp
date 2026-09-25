@@ -50,7 +50,8 @@ async def search(
     lot actually is with product_details() — a tile's title is the seller's
     wording and may name no model at all.
     A tile is not a card: for variants, characteristics, photos and stock call
-    product_details() with its sku.
+    product_details() with its sku. For comparing several products, prefer
+    compare_products(query) instead of search() plus per-hit reads.
     filters comes from get_search_filters() — {key: option_value} for a
     checkbox or category facet, {key: "min;max"} for a range, e.g.
     {"currency_price": "200;600"}. Narrowing by price is a filter, not a sort.
@@ -60,19 +61,40 @@ async def search(
 
 @mcp.tool()
 async def compare_products(
-    query: Annotated[str, Field(min_length=1, description="Search phrase for products to compare.")],
+    query: Annotated[str | None, Field(description="Search phrase; omit when skus are supplied.")] = None,
     limit: Annotated[int, Field(ge=1, le=20, description="Maximum search hits to compare (1–20).")] = 10,
-    reviews_limit: Annotated[int, Field(ge=1, le=20, description="Maximum reviews to read per card (1–20).")] = 10,
+    reviews_limit: Annotated[
+        int, Field(ge=1, le=20, description="Target meaningful useful reviews per SKU (1–20); may be incomplete.")
+    ] = 10,
     sort: SearchSort = "popular",
+    skus: Annotated[
+        list[str] | None, Field(min_length=1, max_length=20, description="Selected SKUs; exclusive with search inputs.")
+    ] = None,
+    category: Annotated[str | None, Field(description="Category slug for search; not available with skus.")] = None,
+    filters: Annotated[
+        dict[str, str] | None, Field(description="Search facets as in search(filters=...); not with skus.")
+    ] = None,
 ) -> ProductComparison:
-    """Read-only search and compact comparison of products in one call.
-    Reviews and their totals belong to a shared card, not necessarily the SKU:
-    review_groups are referenced by products.reviews_ref and can be shared by
-    variants. Review sku is only set when Ozon explicitly supplies itemId.
-    Individual failures are listed in each product's errors; use the granular
-    product_details(), delivery_estimate(), get_reviews() for drill-down.
+    """Prefer this for comparing several products: search with query/category,
+    or pass selected skus to enrich finalists without searching again. Provide
+    exactly one input mode. Search facets match search(filters=...). One read-only
+    call gathers prices, characteristics, delivery and reviews for the hits.
+    Reuse its results; do not fetch the same data again
+    with search(), product_details(), delivery_estimate() or get_reviews().
+    Review samples are per SKU; coverage reports scanned, attributable and
+    meaningful counts for useful and worst sorts. Unattributed reviews are not
+    evidence about a specific SKU. Review sku is only set when Ozon supplies itemId.
+    Individual failures are listed in each product's errors. Use individual
+    tools only for missing fields, contradictory results or deeper finalist
+    checks, not as a second pass over every hit.
     """
-    return await comparison.compare_products(query, limit, reviews_limit, sort)
+    if skus is not None and (query is not None or category is not None or filters is not None):
+        raise ValueError("skus cannot be combined with search inputs")
+    if skus is None and not (query or category):
+        raise ValueError("provide query/category or skus")
+    return await comparison.compare_products(
+        query, limit, reviews_limit, sort, skus=skus, category=category, filters=filters
+    )
 
 
 @mcp.tool()
@@ -107,7 +129,9 @@ async def product_details(
     Each variant carries its own sku, price and availability — that sku is what
     goes into the cart, and for apparel it is the only one that will add.
     with_description / with_reviews fetch those too (separate requests each);
-    get_description() and get_reviews() do the same on their own.
+    get_description() and get_reviews() do the same on their own. When comparing
+    several products, start with compare_products(); read individual cards only
+    for gaps, contradictions or finalists, not for data already returned.
     """
     return await run_blocking(
         lambda: catalog.product_details(sku_or_url, with_description=with_description, with_reviews=with_reviews)
@@ -126,6 +150,8 @@ async def get_reviews(sku_or_url: SkuOrUrl, limit: Limit = 30, sort: ReviewSort 
     Each review keeps «Достоинства» and «Недостатки» apart from the comment,
     carries its useful votes, and names the variant it is about — a card's
     reviews cover its sizes and colours, so some are about a different one.
+    For several products, start with compare_products(); fetch separate reviews
+    only for gaps, contradictions or finalists needing more depth.
     """
     return await run_blocking(lambda: catalog.get_reviews(sku_or_url, limit, sort))
 
@@ -142,7 +168,9 @@ async def delivery_estimate(sku_or_url: SkuOrUrl) -> DeliveryEstimate:
     from which warehouse ("Завтра, 2 сентября" / "ул. Данилова, 17" / "Со
     склада Ozon"). The date is relative to that address, so quote both.
     This is per product, before ordering; for an existing order the dates are
-    in list_orders(), and for an order being formed in get_checkout().
+    in list_orders(), and for an order being formed in get_checkout(). For
+    several products, start with compare_products(); fetch a separate estimate
+    only for a gap, contradiction or finalist, not for every compared hit.
     """
     return await run_blocking(lambda: catalog.delivery_estimate(sku_or_url))
 

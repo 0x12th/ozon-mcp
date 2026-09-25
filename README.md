@@ -233,6 +233,7 @@ different answers.
 | `OZON_ENABLE_ORDERS` | `0` | Allow `place_order` — spends money |
 | `OZON_MONITOR_STORE` | `/data/price_history.json` | Favorites price-history file |
 | `OZON_REQUEST_TIMEOUT` | `30` | Seconds for one HTTP call |
+| `OZON_COMPARISON_TIMEOUT` | `25` | Comparison wall-clock budget; returns completed results with errors for unfinished reads |
 | `OZON_REQUEST_ATTEMPTS` | `3` | Attempts before a call is reported as failed |
 | `OZON_RETRY_BACKOFF_SECONDS` | `1` | Base wait between attempts, doubled and jittered |
 | `OZON_RETRY_CAP_SECONDS` | `20` | Longest wait, including a `Retry-After` Ozon asks for |
@@ -252,10 +253,12 @@ docker build -t ozon-mcp .
 # stdio: the client attaches to the container's stdin/stdout
 docker run -i --rm --shm-size=1g -v /opt/ozon-mcp:/data ozon-mcp
 
-# http: long-lived service on :8084 (/mcp + /metrics)
+# http: local-only service on :8084 (/mcp + /metrics)
 docker run -d --name ozon-mcp --shm-size=1g -v /opt/ozon-mcp:/data \
-  -e OZON_TRANSPORT=http -p 8084:8084 ozon-mcp
+  -e OZON_TRANSPORT=http -p 127.0.0.1:8084:8084 ozon-mcp
 ```
+
+The HTTP transport has no built-in authentication. Keep the port bound to loopback for local use; exposing it grants access to the connected account. An empty `OZON_ALLOWED_HOSTS` does not restrict callers.
 
 `/data` has to be a bind mount. It holds the profile, and Ozon rotates the
 session constantly: cookies rotated over HTTP are pushed back into the profile so

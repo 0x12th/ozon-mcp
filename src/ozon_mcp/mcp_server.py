@@ -65,6 +65,12 @@ product_details() — a tile's title is the seller's wording and may name no mod
 Ozon finds nothing exact for returns nothing rather than the "you might also like" it fills the
 page with. find_cheaper adds Ozon's own «Есть дешевле или быстрее» offers for that product.
 
+When comparing several products, start with compare_products(): pass query to search, or
+skus=[...] to enrich already selected finalists without searching again. It gathers prices,
+characteristics, delivery and useful/worst review samples; check review_groups.coverage before
+using absence of reviews as evidence. Use individual tools only to fill gaps, resolve
+contradictions or examine finalists in more depth. Avoid fetching the same product data twice.
+
 A rating and a review count are Ozon's own numbers: product_details() carries rating,
 reviews_count and questions_count, and get_reviews() adds the breakdown per star plus as many
 reviews as `limit` asks for. count is the product's total and fetched is what came back — quoting
@@ -89,8 +95,9 @@ repeated until complete, merging by sku and preferring received. Never report un
 bought" — it means nobody looked that far back. Budget: a first call with a query ~40-50 s, each
 continuation of 150 orders ~30 s.
 
-A failure never arrives as an empty result: a 502, a timeout or a rate limit raises, because "no
-orders" and "Ozon did not answer" are different answers. Every error carries a code before its
+A failed read never masquerades as an empty page: a 502, a timeout or a rate limit raises; in
+compare_products each failed source appears in that product's errors instead. "No orders" and
+"Ozon did not answer" are different answers. Every error carries a code before its
 sentence — [upstream_unavailable], [rate_limited], [session_expired], [writes_disabled],
 [orders_disabled], [total_mismatch]. Branch on the code; relay the sentence, which is written for
 a person. A signed-out session raises everywhere rather than answering with an empty account:

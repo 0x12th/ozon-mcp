@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ozon_mcp.services import catalog
+from ozon_mcp.utils.observability.review_probe import ReviewProbe, track_review_probe
 from support import page
 
 if TYPE_CHECKING:
@@ -43,6 +44,27 @@ def test_pages_are_walked_until_the_depth_is_met(session: FakeSession) -> None:
     assert [review.score for review in answer.reviews] == [5, 5, 4, 3]
     # The total stays Ozon's, not the number collected.
     assert answer.count == 155848
+
+
+def test_probe_counts_all_parsed_reviews_before_limit(session: FakeSession) -> None:
+    session.pages = {"/reviews/": _listing([5] * 30, following="?page=2")}
+    probe = ReviewProbe()
+    with track_review_probe(probe):
+        answer = catalog.get_reviews("2859492815", limit=10)
+    assert answer.fetched == len(answer.reviews) == 10
+    assert probe.snapshot().raw_reviews == 30
+    assert probe.snapshot().pages == 1
+
+
+def test_probe_counts_following_page_before_deduplication(session: FakeSession) -> None:
+    pages = iter([_listing([5], following="?page=2"), _listing([5, 4], following=None)])
+    session.pages = {"/reviews/": lambda: next(pages)}
+    probe = ReviewProbe()
+    with track_review_probe(probe):
+        answer = catalog.get_reviews("2859492815", limit=10)
+    assert answer.fetched == 2
+    assert probe.snapshot().raw_reviews == 3
+    assert probe.snapshot().pages == 2
 
 
 def test_the_walk_stops_when_a_page_repeats_itself(session: FakeSession) -> None:
