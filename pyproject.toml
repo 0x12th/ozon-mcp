@@ -4,7 +4,10 @@ version = "1.5.0"
 description = "Model Context Protocol server for the ozon.ru buyer account: orders, cart, favorites, product cards, purchase history and catalog search over the internal composer-api."
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Alexander Zhukov" }]
+authors = [
+    { name = "Alexander Zhukov" },
+    { name = "Nikita Biryukov" },
+]
 requires-python = ">=3.13"
 dependencies = [
     "mcp>=1.2,<2",
